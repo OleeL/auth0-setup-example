@@ -1,0 +1,17 @@
+{
+  "lsp": {
+    "basedpyright": {
+      "settings": {
+        "python": {
+          "pythonPath": "be/env/bin/python"
+        },
+        "basedpyright.analysis": {
+          "diagnosticMode": "workspace",
+          "inlayHints": {
+            "callArgumentNames": false
+          }
+        }
+      }
+    }
+  }
+}
