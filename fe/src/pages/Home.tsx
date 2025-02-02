@@ -1,15 +1,12 @@
-import "./App.css";
+import { useNavigate } from "react-router-dom";
+import "../App.css";
 import { useAuth0 } from "@auth0/auth0-react";
 
-function App() {
-  const { isAuthenticated, loginWithRedirect, logout, user, isLoading, error } =
+const Home = () => {
+  const { isAuthenticated, loginWithRedirect, logout, user, isLoading } =
     useAuth0();
 
-  if (error) {
-    console.error({ ...error });
-  }
-
-  console.log({ user, origin: window.location.origin });
+  const navigate = useNavigate();
 
   if (isLoading) {
     return <div>Loading...</div>;
@@ -28,6 +25,7 @@ function App() {
               <h2>Welcome, {user?.name}!</h2>
               <p>Email: {user?.email}</p>
             </div>
+            <button onClick={() => navigate("/profile")}>Profile</button>
             <button
               onClick={() =>
                 logout({ logoutParams: { returnTo: window.location.origin } })
@@ -40,6 +38,6 @@ function App() {
       </header>
     </div>
   );
-}
+};
 
-export default App;
+export default Home;

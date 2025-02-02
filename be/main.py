@@ -1,96 +1,99 @@
-import datetime
-from flask import Flask, request, jsonify
-import jwt
+from flask import Flask, request, jsonify, redirect, session
+from authlib.integrations.flask_client import OAuth
 from dotenv import dotenv_values
 from typing import Dict
+import jwt  # PyJWT
+from jwt import PyJWKClient
 
-envValues = dotenv_values(".env")
+# Load environment variables
+env_values = dotenv_values(".env")
 app = Flask(__name__)
-app.config["SECRET_KEY"] = str(envValues.get("SECRET_KEY", "test123"))
-iss = "my-flask-app"
+app.secret_key = env_values.get("APP_SECRET_KEY", "super-secret-key")
 
-def create_access_token(data: Dict[str, str], expires_in: int = 15) -> str:
-    expiration = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=expires_in)
-    token = jwt.encode(
-        {
-            "data": data,
-            "exp": expiration,
-            "iss": iss
-        },
-        app.config['SECRET_KEY'],
-        algorithm="HS256"
+# Auth0 Configuration
+AUTH0_DOMAIN = env_values["AUTH0_DOMAIN"]
+AUTH0_CLIENT_ID = env_values["AUTH0_CLIENT_ID"]
+AUTH0_CLIENT_SECRET = env_values["AUTH0_CLIENT_SECRET"]
+AUTH0_CALLBACK_URL = env_values.get("AUTH0_CALLBACK_URL", "http://localhost:5999/callback")
+
+if AUTH0_DOMAIN is None or AUTH0_CLIENT_ID is None or AUTH0_CLIENT_SECRET is None:
+    raise Exception("Environment variables were not set correctly")
+
+# Configure Auth0 OAuth
+oauth = OAuth(app)
+auth0 = oauth.register(
+    'auth0',
+    client_id=AUTH0_CLIENT_ID,
+    client_secret=AUTH0_CLIENT_SECRET,
+    api_base_url=f'https://{AUTH0_DOMAIN}',
+    access_token_url=f'https://{AUTH0_DOMAIN}/oauth/token',
+    authorize_url=f'https://{AUTH0_DOMAIN}/authorize',
+    client_kwargs={'scope': 'openid profile email'}, # This is the information we want to get from auth0
+)
+if auth0 is None:
+    raise Exception("auth 0 could not initialize")
+
+# JWKS client for token verification
+jwks_client = PyJWKClient(f'https://{AUTH0_DOMAIN}/.well-known/jwks.json')
+
+def validate_auth0_token(token: str) -> Dict:
+    signing_key = jwks_client.get_signing_key_from_jwt(token)
+    return jwt.decode(
+        token,
+        signing_key.key,
+        algorithms=["RS256"],
+        audience=AUTH0_CLIENT_ID,
+        issuer=f'https://{AUTH0_DOMAIN}/'
     )
-    return token
 
-def create_refresh_token(data: Dict[str, str], expires_in: int = 1440) -> str: # 1440 minutes = 24 hours
-    expiration = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=expires_in)
-    token = jwt.encode(
-        {
-            "data": data,
-            "exp": expiration,
-            "iss": iss
-        },
-        app.config['SECRET_KEY'],
-        algorithm="HS256"
-    )
-    return token
-
-@app.route("/login", methods=["POST"])
+@app.route("/login")
 def login():
-    if (request.json is None):
-        return jsonify({"error": "Bad request"}), 400
-    username = request.json.get("username")
-    password = request.json.get("password")
-    # This is a mock check; in practice, validate with a database
-    if username == "test" and password == "pass":
-        access_token = create_access_token({"username": username})
-        refresh_token = create_refresh_token({"username": username})
-        """
-        We're just sending back this on the response body, ideally, you'd want
-        to send this back as an http only cookie
-        """
-        return jsonify({
-            "access_token": access_token,
-            "refresh_token": refresh_token
-        }), 200
-    else:
-        return jsonify({"error": "Invalid credentials"}), 401
+    return auth0.authorize_redirect(redirect_uri=AUTH0_CALLBACK_URL)
+
+@app.route("/callback")
+def callback():
+    try:
+        token = auth0.authorize_access_token()
+        user_info = auth0.get('userinfo').json()
+
+        # Store user in session
+        session['user'] = {
+            'access_token': token['access_token'],
+            'id_token': token['id_token'],
+            'user_info': user_info
+        }
+
+        return redirect('http://localhost:5173/logged-in')
+    except Exception as e:
+        return jsonify({"error": str(e)}), 401
 
 @app.route("/protected", methods=["GET"])
 def protected():
-    auth_header = request.headers.get("Authorization")
-    if not auth_header:
-        return jsonify({"error": "Missing auth header"}), 401
+    user = session.get('user')
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
 
-    token = auth_header.split(" ")[1]  # Bearer <token>
     try:
-        decoded = jwt.decode(token, app.config['SECRET_KEY'], algorithms=["HS256"])
-        return jsonify({"message": "Access granted", "user_data": decoded["data"]}), 200
+        # Validate the access token
+        decoded = validate_auth0_token(user['access_token'])
+        return jsonify({
+            "message": "Access granted",
+            "user_info": user['user_info'],
+            "token_info": decoded
+        }), 200
     except jwt.ExpiredSignatureError:
         return jsonify({"error": "Token expired"}), 401
     except jwt.InvalidTokenError:
         return jsonify({"error": "Invalid token"}), 401
-    except:
-        return jsonify({"error": "Unexpected error when reading token"}), 401
 
-@app.route("/refresh", methods=["POST"])
-def refresh():
-    if (request.json is None):
-        return jsonify({"error": "Bad request"}), 400
-    refresh_token = request.json.get("refresh_token")
-    if not refresh_token:
-        return jsonify({"error": "Missing refresh token"}), 401
-
-    try:
-        # The next line will throw an error if token is invalid
-        decoded = jwt.decode(refresh_token, app.config['SECRET_KEY'], algorithms=["HS256"])
-        # If we get here, refresh token is valid
-        new_access_token = create_access_token({"username": decoded["data"]["username"]})
-        return jsonify({"access_token": new_access_token}), 200
-    except jwt.ExpiredSignatureError:
-        return jsonify({"error": "Refresh token expired"}), 401
-    except jwt.InvalidTokenError:
-        return jsonify({"error": "Invalid refresh token"}), 401
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(
+        f'https://{AUTH0_DOMAIN}/v2/logout?'
+        f'returnTo={request.host_url}&'
+        f'client_id={AUTH0_CLIENT_ID}'
+    )
 
 if __name__ == "__main__":
     app.run(debug=True, port=5999)
