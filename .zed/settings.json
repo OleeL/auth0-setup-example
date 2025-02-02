@@ -1,17 +1,33 @@
 {
   "lsp": {
-    "basedpyright": {
+    "pyright": {
       "settings": {
+        "python.analysis": {
+          "diagnosticMode": "workspace",
+          "typeCheckingMode": "basic"
+        },
         "python": {
           "pythonPath": "be/env/bin/python"
+        }
+      }
+    },
+    "eslint": {
+      "settings": {
+        "problems": {
+          "shortenToSingleLine": true
+        }
+      }
+    },
+    "vtsls": {
+      "settings": {
+        "typescript": {
+          "tsdk": "fe/node_modules/typescript/lib"
         },
-        "basedpyright.analysis": {
-          "diagnosticMode": "workspace",
-          "inlayHints": {
-            "callArgumentNames": false
-          }
+        "javascript": {
+          "tsdk": "fe/node_modules/typescript/lib"
         }
       }
     }
-  }
+  },
+  "format_on_save": "language_server"
 }

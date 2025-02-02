@@ -1,14 +1,15 @@
 import datetime
 from flask import Flask, request, jsonify
-import jwt  # PyJWT
+import jwt
 from dotenv import dotenv_values
+from typing import Dict
+
 envValues = dotenv_values(".env")
 app = Flask(__name__)
-app.config["SECRET_KEY"] = envValues.get("SECRET_KEY", "test123")
+app.config["SECRET_KEY"] = str(envValues.get("SECRET_KEY", "test123"))
 iss = "my-flask-app"
 
-# Issue Access Token
-def create_access_token(data, expires_in=15): # 15 minutes
+def create_access_token(data: Dict[str, str], expires_in: int = 15) -> str:
     expiration = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=expires_in)
     token = jwt.encode(
         {
@@ -21,8 +22,7 @@ def create_access_token(data, expires_in=15): # 15 minutes
     )
     return token
 
-# Issue Refresh Token (longer expiry)
-def create_refresh_token(data, expires_in=1440): # 1440 minutes = 24 hours
+def create_refresh_token(data: Dict[str, str], expires_in: int = 1440) -> str: # 1440 minutes = 24 hours
     expiration = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=expires_in)
     token = jwt.encode(
         {
@@ -37,6 +37,8 @@ def create_refresh_token(data, expires_in=1440): # 1440 minutes = 24 hours
 
 @app.route("/login", methods=["POST"])
 def login():
+    if (request.json is None):
+        return jsonify({"error": "Bad request"}), 400
     username = request.json.get("username")
     password = request.json.get("password")
     # This is a mock check; in practice, validate with a database
@@ -73,12 +75,14 @@ def protected():
 
 @app.route("/refresh", methods=["POST"])
 def refresh():
+    if (request.json is None):
+        return jsonify({"error": "Bad request"}), 400
     refresh_token = request.json.get("refresh_token")
     if not refresh_token:
         return jsonify({"error": "Missing refresh token"}), 401
 
     try:
-        # The next line will throw an error if token is invalid 
+        # The next line will throw an error if token is invalid
         decoded = jwt.decode(refresh_token, app.config['SECRET_KEY'], algorithms=["HS256"])
         # If we get here, refresh token is valid
         new_access_token = create_access_token({"username": decoded["data"]["username"]})
