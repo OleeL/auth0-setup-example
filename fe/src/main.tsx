@@ -10,6 +10,7 @@ import ProtectedRoute from "./components/ProtectedRoute.tsx";
 // Auth0 configuration
 const domain = import.meta.env.VITE_AUTH0_DOMAIN;
 const clientId = import.meta.env.VITE_AUTH0_CLIENT_ID;
+const audience = import.meta.env.VITE_AUTH0_AUDIENCE;
 
 if (!domain) throw new Error("Auth0 domain not set in .env");
 if (!clientId) throw new Error("Auth0 client ID not set in .env");
@@ -21,6 +22,7 @@ createRoot(document.getElementById("root")!).render(
       clientId={clientId}
       authorizationParams={{
         redirect_uri: window.location.origin, // Redirect to the current origin after login
+        audience,
       }}
       cacheLocation="localstorage"
       onRedirectCallback={(appState) => {

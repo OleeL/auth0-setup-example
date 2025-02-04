@@ -1,99 +1,41 @@
-from flask import Flask, request, jsonify, redirect, session
-from authlib.integrations.flask_client import OAuth
+from flask import Flask, jsonify, request
 from dotenv import dotenv_values
-from typing import Dict
-import jwt  # PyJWT
-from jwt import PyJWKClient
+from flask_cors import CORS
+import base64
+from authlib.integrations.flask_oauth2 import ResourceProtector
+from validator import getIdFromRequest, Auth0JWTBearerTokenValidator
 
-# Load environment variables
 env_values = dotenv_values(".env")
-app = Flask(__name__)
-app.secret_key = env_values.get("APP_SECRET_KEY", "super-secret-key")
+AUTH0_DOMAIN = env_values.get("AUTH0_DOMAIN")
+AUTH0_AUDIENCE = env_values.get("AUTH0_AUDIENCE")
 
-# Auth0 Configuration
-AUTH0_DOMAIN = env_values["AUTH0_DOMAIN"]
-AUTH0_CLIENT_ID = env_values["AUTH0_CLIENT_ID"]
-AUTH0_CLIENT_SECRET = env_values["AUTH0_CLIENT_SECRET"]
-AUTH0_CALLBACK_URL = env_values.get("AUTH0_CALLBACK_URL", "http://localhost:5999/callback")
-
-if AUTH0_DOMAIN is None or AUTH0_CLIENT_ID is None or AUTH0_CLIENT_SECRET is None:
+if AUTH0_DOMAIN is None or AUTH0_AUDIENCE is None:
     raise Exception("Environment variables were not set correctly")
 
-# Configure Auth0 OAuth
-oauth = OAuth(app)
-auth0 = oauth.register(
-    'auth0',
-    client_id=AUTH0_CLIENT_ID,
-    client_secret=AUTH0_CLIENT_SECRET,
-    api_base_url=f'https://{AUTH0_DOMAIN}',
-    access_token_url=f'https://{AUTH0_DOMAIN}/oauth/token',
-    authorize_url=f'https://{AUTH0_DOMAIN}/authorize',
-    client_kwargs={'scope': 'openid profile email'}, # This is the information we want to get from auth0
+require_auth = ResourceProtector()
+validator = Auth0JWTBearerTokenValidator(
+    AUTH0_DOMAIN,
+    AUTH0_AUDIENCE,
 )
-if auth0 is None:
-    raise Exception("auth 0 could not initialize")
+require_auth.register_token_validator(validator)
+app = Flask(__name__)
+CORS(app, resources={r"/*": {"origins": "http://localhost:5173"}})
+app.secret_key = env_values.get("APP_SECRET_KEY", "super-secret-key")
 
-# JWKS client for token verification
-jwks_client = PyJWKClient(f'https://{AUTH0_DOMAIN}/.well-known/jwks.json')
-
-def validate_auth0_token(token: str) -> Dict:
-    signing_key = jwks_client.get_signing_key_from_jwt(token)
-    return jwt.decode(
-        token,
-        signing_key.key,
-        algorithms=["RS256"],
-        audience=AUTH0_CLIENT_ID,
-        issuer=f'https://{AUTH0_DOMAIN}/'
-    )
-
-@app.route("/login")
-def login():
-    return auth0.authorize_redirect(redirect_uri=AUTH0_CALLBACK_URL)
-
-@app.route("/callback")
-def callback():
-    try:
-        token = auth0.authorize_access_token()
-        user_info = auth0.get('userinfo').json()
-
-        # Store user in session
-        session['user'] = {
-            'access_token': token['access_token'],
-            'id_token': token['id_token'],
-            'user_info': user_info
-        }
-
-        return redirect('http://localhost:5173/logged-in')
-    except Exception as e:
-        return jsonify({"error": str(e)}), 401
+# Load the super secret image and convert it to base64
+super_secret_image = ""
+with open("./rx8cool.jpg", "rb") as img_file:
+    super_secret_image = base64.b64encode(img_file.read()).decode('utf-8')
 
 @app.route("/protected", methods=["GET"])
+@require_auth(None)
 def protected():
-    user = session.get('user')
-    if not user:
-        return jsonify({"error": "Unauthorized"}), 401
-
-    try:
-        # Validate the access token
-        decoded = validate_auth0_token(user['access_token'])
-        return jsonify({
-            "message": "Access granted",
-            "user_info": user['user_info'],
-            "token_info": decoded
-        }), 200
-    except jwt.ExpiredSignatureError:
-        return jsonify({"error": "Token expired"}), 401
-    except jwt.InvalidTokenError:
-        return jsonify({"error": "Invalid token"}), 401
-
-@app.route("/logout")
-def logout():
-    session.clear()
-    return redirect(
-        f'https://{AUTH0_DOMAIN}/v2/logout?'
-        f'returnTo={request.host_url}&'
-        f'client_id={AUTH0_CLIENT_ID}'
-    )
+    id = getIdFromRequest(request)
+    return jsonify({
+        "message": "Access granted to protected content",
+        "secret_image": super_secret_image,
+        "other_data": id
+    }), 200
 
 if __name__ == "__main__":
     app.run(debug=True, port=5999)
